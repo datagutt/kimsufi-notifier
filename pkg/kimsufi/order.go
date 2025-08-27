@@ -49,6 +49,27 @@ func (s *Service) AddEcoItem(cartID, planCode string, quantity int, priceConfig 
 	return &resp, nil
 }
 
+// AddVPSItem adds a VPS item to the cart with the given planCode, quantity and pricing config.
+func (s *Service) AddVPSItem(cartID, planCode string, quantity int, priceConfig kimsufiorder.VPSItemPriceConfig) (*kimsufiorder.VPSItemResponse, error) {
+	u := fmt.Sprintf("/order/cart/%s/vps", cartID)
+
+	req := kimsufiorder.VPSItemRequest{
+		Duration:    priceConfig.Duration,
+		PlanCode:    planCode,
+		PricingMode: priceConfig.PricingMode,
+		Quantity:    quantity,
+	}
+	s.logger.Debugf("AddVPSItem request: %+#v", req)
+
+	var resp kimsufiorder.VPSItemResponse
+	err := s.client.PostUnAuth(u, req, &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
 // GetEcoInfo returns information about an eco item in the cart.
 func (s *Service) GetEcoInfo(cartID, planCode string) (kimsufiorder.EcoItemInfos, error) {
 	u, err := url.Parse(fmt.Sprintf("/order/cart/%s/eco", cartID))
@@ -193,4 +214,48 @@ func (s *Service) GenerateItemAutoConfigurations(itemConfigurationOptions []kims
 	}
 
 	return autoConfigurations
+}
+
+// GetVPSInfo returns information about VPS items available in the cart.
+func (s *Service) GetVPSInfo(cartID, planCode string) (kimsufiorder.VPSItemInfos, error) {
+	u, err := url.Parse(fmt.Sprintf("/order/cart/%s/vps", cartID))
+	if err != nil {
+		return nil, err
+	}
+
+	q := u.Query()
+	if planCode != "" {
+		q.Set("planCode", planCode)
+	}
+	u.RawQuery = q.Encode()
+
+	var resp kimsufiorder.VPSItemInfos
+	err = s.client.GetUnAuth(u.String(), &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+// GetVPSOptions returns the options for VPS items in the cart.
+func (s *Service) GetVPSOptions(cartID string, planCode string) (kimsufiorder.VPSItemOptions, error) {
+	u, err := url.Parse(fmt.Sprintf("/order/cart/%s/vps/options", cartID))
+	if err != nil {
+		return nil, err
+	}
+
+	q := u.Query()
+	if planCode != "" {
+		q.Set("planCode", planCode)
+	}
+	u.RawQuery = q.Encode()
+
+	var resp kimsufiorder.VPSItemOptions
+	err = s.client.GetUnAuth(u.String(), &resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
 }

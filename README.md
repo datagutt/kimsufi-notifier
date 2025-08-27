@@ -9,14 +9,14 @@
 
 ## About <img src="./assets/info.svg" width="24">
 
-[OVH Eco dedicated servers](https://eco.ovhcloud.com) are known for their low prices and high demand. As a result, they are often out of stock. This program is used to check for server availability, and to place order for servers. Note: the previous Bash script collection was moved to [`bash`](https://github.com/TheoBrigitte/kimsufi-notifier/tree/bash) branch.
+[OVH Eco dedicated servers](https://eco.ovhcloud.com) and [VPS](https://www.ovhcloud.com/en/vps/) are known for their low prices and high demand. As a result, they are often out of stock. This program is used to check for server availability, and to place order for servers. Note: the previous Bash script collection was moved to [`bash`](https://github.com/TheoBrigitte/kimsufi-notifier/tree/bash) branch.
 
 This is my playground to learn how the OVH API works, it is then ported into a Telegram Bot at [https://t.me/KimsufiNotifierBot](https://t.me/KimsufiNotifierBot) which is more user-friendly and provides more features.
 
 ## Features <img src="./assets/star.svg" width="24">
 
-- [List available servers](#list-available-servers) from OVH Eco catalog
-- [Check availability](#check-availability) of a specific server in one or multiple datacenters
+- [List available servers](#list-available-servers) from OVH Eco catalog and VPS catalog
+- [Check availability](#check-availability) of a specific server or VPS in one or multiple datacenters
 - [Order a server](#order-a-server) directly from the command line
 
 ## Quickstart <img src="./assets/rocket.svg" width="24">
@@ -57,6 +57,21 @@ planCode          category    name                             price        stat
 ...
 ```
 
+#### List available VPS
+
+List VPS instances from OVH VPS catalog with real-time availability data.
+
+```
+$ kimsufi-notifier list --category vps --country FR
+planCode              category    name                  price       status       datacenters
+--------              --------    ----                  -----       ------       -----------
+s1-2                  VPS         VPS 2018 SSD 1        2.99 EUR    available    SBG, GRA, BHS
+vps-starter-1-2-20    VPS         VPS Starter 1-2-20    3.50 EUR    available    SBG, GRA, DE, BHS, WAW, UK, SYD, SGP
+vps-value-1-2-40      VPS         VPS Value 1-2-40      5.80 EUR    available    SBG, GRA, DE, BHS, WAW, UK, SYD, SGP
+vps-essential-2-4-40  VPS         VPS Essential 2-4-40  11.30 EUR   available    SBG, GRA, DE, BHS, WAW, UK, SYD, SGP
+...
+```
+
 #### Check availability
 
 Check availability of a specific server in all datacenters.
@@ -73,6 +88,24 @@ planCode    memory                storage              status         datacenter
 25skle01    ram-32g-noecc-1333    softraid-2x960ssd    unavailable
 25skle01    ram-32g-noecc-1333    softraid-3x2000sa    available      bhs
 25skle01    ram-32g-noecc-1333    softraid-3x480ssd    unavailable
+```
+
+#### Check VPS availability
+
+Check availability of a specific VPS across datacenters with OS-specific availability.
+
+```
+$ kimsufi-notifier check --plan-code vps-starter-1-2-20 --country FR
+planCode              datacenter    status       linuxStatus    windowsStatus
+--------              ----------    ------       -----------    -------------
+vps-starter-1-2-20    SBG           available    available      out-of-stock
+vps-starter-1-2-20    GRA           available    available      out-of-stock
+vps-starter-1-2-20    DE            available    available      out-of-stock
+vps-starter-1-2-20    BHS           available    available      out-of-stock
+vps-starter-1-2-20    WAW           available    available      out-of-stock
+vps-starter-1-2-20    UK            available    available      out-of-stock
+vps-starter-1-2-20    SYD           available    available      out-of-stock
+vps-starter-1-2-20    SGP           available    available      out-of-stock
 ```
 
 #### Order a server

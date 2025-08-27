@@ -22,13 +22,27 @@ const (
 	anyOption = "any"
 )
 
+// mapVPSOptionFamily maps user-friendly option names to API option families for VPS
+func mapVPSOptionFamily(userFamily string) string {
+	switch userFamily {
+	case "os":
+		return "vps_os"
+	case "backup":
+		return "vps_backupid"
+	default:
+		return userFamily
+	}
+}
+
 var (
 	Cmd = &cobra.Command{
 		Use:   "order",
 		Short: "Place an order",
-		Long:  "Place an order for a servers from OVH Eco (including Kimsufi) catalog",
+		Long:  "Place an order for servers from OVH Eco (including Kimsufi) catalog and VPS catalog",
 		Example: `  kimsufi-notifier order --plan-code 24ska01 --datacenter rbx --dry-run
-  kimsufi-notifier order --plan-code 25skle01 --datacenter bhs --item-option memory=ram-32g-noecc-1333-25skle01,storage=softraid-3x2000sa-25skle01`,
+  kimsufi-notifier order --plan-code 25skle01 --datacenter bhs --item-option memory=ram-32g-noecc-1333-25skle01,storage=softraid-3x2000sa-25skle01
+  kimsufi-notifier order --plan-code vps-starter-1-2-20 --datacenter GRA --dry-run
+  kimsufi-notifier order --plan-code vps-2025-model2 --datacenter US-WEST-OR --item-option os=option-linux`,
 		RunE: runner,
 	}
 
@@ -63,7 +77,7 @@ func init() {
 	Cmd.PersistentFlags().IntVarP(&quantity, "quantity", "q", kimsufiorder.QuantityDefault, "item quantity")
 
 	Cmd.PersistentFlags().StringToStringVarP(&itemUserConfigurations, "item-configuration", "i", nil, "item configuration, comma separated list, see --list-configurations for available values (e.g. region=europe)")
-	Cmd.PersistentFlags().StringSliceVarP(&itemUserOptions, "item-option", "o", nil, fmt.Sprintf("item option, comma separated list, use any to include all options, see --list-options for available values (e.g. memory=ram-64g-noecc-2133-24ska01, memory=%[1]s, %[1]s)", anyOption))
+	Cmd.PersistentFlags().StringSliceVarP(&itemUserOptions, "item-option", "o", nil, fmt.Sprintf("item option, comma separated list, use any to include all options, see --list-options for available values (e.g. memory=ram-64g-noecc-2133-24ska01, os=option-linux for VPS, memory=%[1]s, %[1]s)", anyOption))
 
 	Cmd.PersistentFlags().BoolVar(&listConfigurations, "list-configurations", false, "list available item configurations")
 	Cmd.PersistentFlags().BoolVar(&listOptions, "list-options", false, "list available item options")
@@ -95,6 +109,12 @@ func runner(cmd *cobra.Command, args []string) error {
 	k, err := kimsufi.NewService(endpoint, log.StandardLogger(), nil)
 	if err != nil {
 		return fmt.Errorf("error: %w", err)
+	}
+
+	// Check if this is a VPS plan code and route to VPS ordering
+	isVPSPlan := strings.HasPrefix(planCode, "vps-") || strings.HasPrefix(planCode, "s1-")
+	if isVPSPlan {
+		return runnerVPS(cmd, k, ovhSubsidiary)
 	}
 
 	// Create cart
@@ -392,4 +412,312 @@ func printConfigurations(configurations []kimsufiorder.ItemConfiguration) {
 			fmt.Printf("%s=%s\n", config.Label, value)
 		}
 	}
+}
+
+// runnerVPS handles VPS plan ordering
+
+// runnerVPS handles VPS plan ordering
+func runnerVPS(cmd *cobra.Command, k *kimsufi.Service, ovhSubsidiary string) error {
+	// Create cart
+	expire := time.Now().AddDate(0, 0, 1)
+	cart, err := k.CreateCart(ovhSubsidiary, expire)
+	if err != nil {
+		return fmt.Errorf("error: %w", err)
+	}
+	fmt.Printf("> cart created id=%s\n", cart.CartID)
+
+	// Retrieve VPS item options
+	vpsOptions, err := k.GetVPSOptions(cart.CartID, planCode)
+	if err != nil {
+		return fmt.Errorf("error: %w", err)
+	}
+
+	priceConfig := kimsufiorder.VPSItemPriceConfig{
+		Duration:    priceDuration,
+		PricingMode: priceMode,
+	}
+
+	if listOptions {
+		printVPSItemOptions(vpsOptions, priceConfig)
+		return nil
+	}
+
+	// Retrieve VPS item information
+	vpsInfo, err := k.GetVPSInfo(cart.CartID, planCode)
+	if err != nil {
+		return fmt.Errorf("error: %w", err)
+	}
+
+	if listPrices {
+		return printVPSPrices(vpsInfo, planCode)
+	}
+
+	// Ensure price config is valid, otherwise use default
+	priceConfig = vpsInfo.GetPriceConfigOrDefault(planCode, priceConfig)
+
+	// Add VPS plan to cart
+	item, err := k.AddVPSItem(cart.CartID, planCode, quantity, priceConfig)
+	if err != nil {
+		return fmt.Errorf("error: %w", err)
+	}
+	fmt.Printf("> cart item added id=%d\n", item.ItemID)
+
+	requiredConfigurations, err := k.GetItemRequiredConfiguration(cart.CartID, int(item.ItemID))
+	if err != nil {
+		return fmt.Errorf("error: %w", err)
+	}
+
+	if listConfigurations {
+		printConfigurations(requiredConfigurations)
+		return nil
+	}
+
+	if len(datacenters) == 0 {
+		return fmt.Errorf("--datacenters is required")
+	}
+
+	// For VPS, validate datacenters against availability API
+	if slices.Contains(datacenters, anyOption) {
+		// Get available datacenters for this VPS plan
+		vpsAvailabilities, err := k.GetVPSAvailabilities(planCode, ovhSubsidiary, "")
+		if err != nil {
+			return fmt.Errorf("failed to get VPS availability: %w", err)
+		}
+		datacenters = vpsAvailabilities.GetAvailableDatacenterCodes()
+		if len(datacenters) == 0 {
+			return fmt.Errorf("no datacenters available for plan %s", planCode)
+		}
+		fmt.Printf("> using available datacenters: %s\n", strings.Join(datacenters, ", "))
+	}
+
+	// Prepare item configurations
+	itemConfigurations := kimsufiorder.NewItemConfigurationsFromMap(itemUserConfigurations)
+	r := kimsufiregion.GetRegionFromEndpoint(cmd.Flag(flag.OVHAPIEndpointFlagName).Value.String())
+	if r != nil {
+		itemConfigurations.Add(kimsufiorder.ConfigurationLabelRegion, r.Region)
+	}
+
+	// Add datacenter configuration if specified
+	if len(datacenters) > 0 && !slices.Contains(datacenters, anyOption) {
+		// Use the first specified datacenter for VPS
+		itemConfigurations.Add(kimsufiorder.ConfigurationLabelDatacenter, datacenters[0])
+	}
+
+	autoConfigs := k.GenerateItemAutoConfigurations(requiredConfigurations)
+	userConfigs := autoConfigs.Merge(itemConfigurations)
+
+	// Handle VPS options - convert them to item configurations
+	var vpsOptionConfigs kimsufiorder.ItemConfigurationRequests
+	allOptions := slices.Contains(itemUserOptions, anyOption)
+	if allOptions {
+		// Get all mandatory options for VPS
+		mandatoryVPSOptions := vpsOptions.GetMandatoryOptions(nil)
+		for _, option := range mandatoryVPSOptions {
+			vpsOptionConfigs = append(vpsOptionConfigs, kimsufiorder.ItemConfigurationRequest{
+				Label: option.Family,
+				Value: option.PlanCode,
+			})
+		}
+	} else if len(itemUserOptions) > 0 {
+		userOptions, err := kimsufiorder.NewOptionsFromSlice(itemUserOptions)
+		if err != nil {
+			return fmt.Errorf("error: %w", err)
+		}
+		for _, option := range userOptions {
+			vpsOptionConfigs = append(vpsOptionConfigs, kimsufiorder.ItemConfigurationRequest{
+				Label: mapVPSOptionFamily(option.Family),
+				Value: option.PlanCode,
+			})
+		}
+	} else {
+		// If no options specified, try to get default mandatory options
+		mandatoryVPSOptions := vpsOptions.GetMandatoryOptions(nil)
+		if len(mandatoryVPSOptions) > 0 {
+			// Use the first available option for each mandatory family
+			for _, option := range mandatoryVPSOptions {
+				// For OS, prefer Linux options
+				if option.Family == "vps_os" {
+					// Look for Linux options first
+					for _, opt := range vpsOptions {
+						if opt.Family == "vps_os" && strings.Contains(strings.ToLower(opt.ProductName), "linux") {
+							vpsOptionConfigs = append(vpsOptionConfigs, kimsufiorder.ItemConfigurationRequest{
+								Label: opt.Family,
+								Value: opt.PlanCode,
+							})
+							break
+						}
+					}
+					if len(vpsOptionConfigs) == 0 || vpsOptionConfigs[len(vpsOptionConfigs)-1].Label != "vps_os" {
+						// Fallback to first OS option
+						vpsOptionConfigs = append(vpsOptionConfigs, kimsufiorder.ItemConfigurationRequest{
+							Label: option.Family,
+							Value: option.PlanCode,
+						})
+					}
+				} else {
+					// For other mandatory options, use the first available
+					vpsOptionConfigs = append(vpsOptionConfigs, kimsufiorder.ItemConfigurationRequest{
+						Label: option.Family,
+						Value: option.PlanCode,
+					})
+				}
+			}
+		}
+	}
+
+	// Merge VPS option configurations with user configurations
+	userConfigs = userConfigs.Merge(vpsOptionConfigs)
+
+	// For VPS, skip manual configuration if datacenter is already specified
+	var configurations kimsufiorder.ItemConfigurationRequests
+	if len(datacenters) > 0 && !slices.Contains(datacenters, anyOption) {
+		// All required configurations should be available, skip manual input
+		configurations = userConfigs
+	} else {
+		manualConfigs, err := generateItemManualConfiguration(userConfigs, requiredConfigurations)
+		if err != nil {
+			return fmt.Errorf("error: %w", err)
+		}
+		configurations = userConfigs.Merge(manualConfigs)
+	}
+
+	// Configure item
+	for _, configuration := range configurations {
+		resp, err := k.AddItemConfiguration(cart.CartID, int(item.ItemID), configuration)
+		if err != nil {
+			return fmt.Errorf("error: %w", err)
+		}
+		fmt.Printf("> cart item configured: %s=%s\n", resp.Label, resp.Value)
+	}
+
+	fmt.Printf("> vps options configured: %d\n", len(vpsOptionConfigs))
+	fmt.Printf("> datacenter(s): %d\n", len(datacenters))
+
+	// Stop on dry-run
+	if dryRun {
+		fmt.Println("> dry-run enabled, skipping order submission")
+		return nil
+	}
+
+	// Read OVH API credentials from environment
+	appKey := os.Getenv(ovhAppKeyEnvVarName)
+	if appKey == "" {
+		return fmt.Errorf("%s env var is required", ovhAppKeyEnvVarName)
+	}
+	appSecret := os.Getenv(ovhAppSecretEnvVarName)
+	if appSecret == "" {
+		return fmt.Errorf("%s env var is required", ovhAppSecretEnvVarName)
+	}
+	consumerKey := os.Getenv(ovhConsumerKeyEnvVarName)
+	if consumerKey == "" {
+		return fmt.Errorf("%s env var is required", ovhConsumerKeyEnvVarName)
+	}
+
+	// Authenticate
+	k, err = k.WithAuth(appKey, appSecret, consumerKey)
+	if err != nil {
+		return fmt.Errorf("error: %w", err)
+	}
+
+	// Assign cart to user account
+	err = k.AssignCart(cart.CartID)
+	if err != nil {
+		return fmt.Errorf("error: %w", err)
+	}
+	fmt.Println("> cart assigned")
+
+	// For VPS, use the configured datacenter or try all available ones
+	var datacentersToTry []string
+	if len(datacenters) > 0 && !slices.Contains(datacenters, anyOption) {
+		// Use the specific datacenter that was configured
+		datacentersToTry = []string{datacenters[0]}
+	} else {
+		// Try all available datacenters
+		datacentersToTry = datacenters
+	}
+
+	for _, datacenter := range datacentersToTry {
+		// Only configure datacenter if it's not already configured
+		var resp *kimsufiorder.ItemConfigurationResponse
+		if userConfigs.GetByLabel(kimsufiorder.ConfigurationLabelDatacenter) == nil {
+			datacenterConfiguration := kimsufiorder.ItemConfigurationRequest{
+				Label: kimsufiorder.ConfigurationLabelDatacenter,
+				Value: datacenter,
+			}
+
+			var err error
+			resp, err = k.AddItemConfiguration(cart.CartID, int(item.ItemID), datacenterConfiguration)
+			if err != nil {
+				return fmt.Errorf("error: %w", err)
+			}
+			fmt.Printf("> datacenter %s configured\n", resp.Value)
+		} else {
+			fmt.Printf("> using pre-configured datacenter: %s\n", datacenter)
+		}
+
+		// Checkout and complete the order
+		checkoutResp, err := k.CheckoutCart(cart.CartID, autoPay)
+		if err == nil {
+			fmt.Printf("> order completed: %s\n", checkoutResp.URL)
+			return nil
+		}
+
+		if kimsufi.IsNotAvailableError(err) {
+			fmt.Printf("> datacenter %s not available\n", datacenter)
+		} else {
+			fmt.Printf("> error: %v\n", err)
+		}
+
+		// Remove datacenter configuration if we added it
+		if resp != nil {
+			err = k.RemoveItemConfiguration(cart.CartID, int(item.ItemID), resp.ID)
+			if err != nil {
+				return fmt.Errorf("error: %w", err)
+			}
+		}
+	}
+
+	return fmt.Errorf("no available datacenters for VPS plan %s", planCode)
+}
+
+func printVPSItemOptions(options kimsufiorder.VPSItemOptions, priceConfig kimsufiorder.VPSItemPriceConfig) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
+	fmt.Fprintln(w, "item-option\tname\tprice")
+	fmt.Fprintln(w, "-----------\t----\t-----")
+	for _, o := range options {
+		if !o.Mandatory {
+			continue
+		}
+
+		price := ""
+		p := o.GetPriceByConfig(priceConfig)
+		if p != nil {
+			price = p.Price.Text
+		}
+
+		fmt.Fprintf(w, "%s=%s\t%s\t%s\n", o.Family, o.PlanCode, o.ProductName, price)
+	}
+	w.Flush()
+}
+
+func printVPSPrices(vpsInfos kimsufiorder.VPSItemInfos, planCode string) error {
+	planInfo := vpsInfos.GetByPlanCode(planCode)
+	if planInfo == nil {
+		return fmt.Errorf("VPS plan %s not found", planCode)
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
+	fmt.Fprintln(w, "price-duration\tprice-mode\tprice\tdescription")
+	fmt.Fprintln(w, "--------------\t----------\t-----\t-----------")
+
+	slices.SortFunc(planInfo.Prices, func(i, j kimsufiorder.VPSItemInfoPrice) int {
+		return strings.Compare(i.Duration+i.PricingMode, j.Duration+j.PricingMode)
+	})
+
+	for _, p := range planInfo.Prices {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", p.Duration, p.PricingMode, p.Price.Text, p.Description)
+	}
+	w.Flush()
+
+	return nil
 }

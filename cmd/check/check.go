@@ -20,9 +20,10 @@ var (
 	Cmd = &cobra.Command{
 		Use:   "check",
 		Short: "Check server availability",
-		Long:  "Check OVH Eco (including Kimsufi) server availability\n\ndatacenters are the available datacenters for this plan",
+		Long:  "Check OVH Eco (including Kimsufi) server and VPS availability\n\ndatacenters are the available datacenters for this plan",
 		Example: `  kimsufi-notifier check --plan-code 24ska01
-  kimsufi-notifier check --plan-code 24ska01 --datacenters gra,rbx`,
+  kimsufi-notifier check --plan-code 24ska01 --datacenters gra,rbx
+  kimsufi-notifier check --plan-code vps-starter-1-2-20 --country FR`,
 		RunE: runner,
 	}
 
@@ -59,6 +60,13 @@ func runner(cmd *cobra.Command, args []string) error {
 	// Flag validation
 	if planCode == "" {
 		return fmt.Errorf("--%s is required", flag.PlanCodeFlagName)
+	}
+
+	// Check if this is a VPS plan code - VPS plans typically start with "vps-" or "s1-"
+	isVPSPlan := strings.HasPrefix(planCode, "vps-") || strings.HasPrefix(planCode, "s1-")
+
+	if isVPSPlan {
+		return runnerVPS(cmd, k, planCode, datacenters)
 	}
 
 	var catalog *kimsuficatalog.Catalog

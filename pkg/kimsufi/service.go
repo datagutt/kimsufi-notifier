@@ -141,6 +141,50 @@ func (s *Service) ListServers(ovhSubsidiary string) (*kimsuficatalog.Catalog, er
 	return catalog, nil
 }
 
+// ListVPSServers returns the VPS catalog for the given OVH subsidiary.
+// ovhSubsidiary is the country code to filter on, given in a two-letter format.
+// see https://eu.api.ovh.com/console/?section=%2Forder&branch=v1#get-/order/catalog/public/vps
+func (s *Service) ListVPSServers(ovhSubsidiary string) (*kimsuficatalog.VPSCatalog, error) {
+	path := "/order/catalog/public/vps"
+
+	queryArgs := map[string]string{
+		"ovhSubsidiary": ovhSubsidiary,
+	}
+
+	var catalog *kimsuficatalog.VPSCatalog
+	err := s.request(http.MethodGet, path, queryArgs, nil, &catalog, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return catalog, nil
+}
+
+// GetVPSAvailabilities returns VPS availability data for a specific plan code.
+// planCode is the VPS plan code to check availability for.
+// ovhSubsidiary is the country code to filter on, given in a two-letter format.
+// os is optional OS filter.
+// see https://ca.api.ovh.com/console/?section=%2Fvps&branch=v1#get-/vps/order/rule/datacenter
+func (s *Service) GetVPSAvailabilities(planCode, ovhSubsidiary, os string) (*kimsufiavailability.VPSAvailabilities, error) {
+	path := "/vps/order/rule/datacenter"
+
+	queryArgs := map[string]string{
+		"ovhSubsidiary": ovhSubsidiary,
+		"planCode":      planCode,
+	}
+	if os != "" {
+		queryArgs["os"] = os
+	}
+
+	var availabilities *kimsufiavailability.VPSAvailabilities
+	err := s.request(http.MethodGet, path, queryArgs, nil, &availabilities, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return availabilities, nil
+}
+
 // GetAuthDetails performs a test API request to check if the client is authenticated.
 func (s *Service) GetAuthDetails() error {
 	path := "/auth/details"

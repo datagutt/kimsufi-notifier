@@ -6,6 +6,7 @@ var (
 		{"kimsufi", "Kimsufi", "sk"},
 		{"soyoustart", "So you Start", "sys"},
 		{"rise", "Rise", "rise"},
+		{"vps", "VPS", "vps"},
 		{"", "uncategorized", ""},
 	}
 )
