@@ -6,12 +6,12 @@ A shell script that continuously monitors VPS availability and automatically pla
 
 - 🔍 **Continuous Monitoring** - Checks VPS availability at configurable intervals
 - 🚀 **Auto-Ordering** - Automatically places orders when VPS becomes available
-- 👀 **Monitoring-Only Mode** - Run without credentials to monitor availability only
 - 📊 **Detailed Logging** - Comprehensive logging with timestamps and colored output
 - 🔄 **Retry Logic** - Handles order failures with configurable retry attempts
 - 🔔 **Notifications** - Optional webhook notifications for order success/failure
 - ⚙️ **Flexible Configuration** - Easy configuration via environment variables
 - 🛡️ **Error Handling** - Robust error handling and recovery
+- 🔒 **Duplicate Prevention** - State file prevents multiple orders for same VPS
 
 ## Quick Start
 
@@ -36,9 +36,20 @@ nano vps-monitor-config.sh
 ### 3. Run the Monitor
 
 ```bash
-# Source your configuration and run the monitor
-source vps-monitor-config.sh
+export CHECK_INTERVAL="60"
 ./vps-monitor.sh
+```
+
+### Reset State File
+
+If you need to place another order after a successful order, reset the state file:
+
+```bash
+# Reset state file to allow new orders
+./vps-monitor.sh --reset
+
+# Or manually delete the state file
+rm vps-monitor.state
 ```
 
 ## Configuration Options
@@ -66,6 +77,7 @@ source vps-monitor-config.sh
 | `CHECK_INTERVAL` | `300` | Seconds between checks |
 | `MAX_RETRIES` | `3` | Max order retry attempts |
 | `LOG_FILE` | `vps-monitor.log` | Log file location |
+| `STATE_FILE` | `vps-monitor.state` | State file to prevent duplicate orders |
 | `WEBHOOK_URL` | *(empty)* | Webhook URL for notifications |
 
 ## Usage Examples
@@ -286,6 +298,26 @@ export CHECK_INTERVAL=60
 ./vps-monitor.sh
 
 # This will check availability every minute and log results without attempting orders
+```
+
+## Duplicate Order Prevention
+
+The script uses a state file (`vps-monitor.state`) to prevent duplicate orders:
+
+- **Automatic Creation**: State file is created after successful order placement
+- **Startup Check**: Script checks state file on startup and exits if order already placed
+- **Manual Reset**: Use `--reset` flag or delete state file to allow new orders
+- **Crash Protection**: Prevents orders if script crashes after successful order but before exit
+
+### State File Contents
+
+```
+# VPS Monitor State File
+ORDER_PLACED=true
+PLAN_CODE=vps-2025-model2
+DATACENTER=US-WEST-OR
+TIMESTAMP=2024-01-15 10:35:35
+PID=12345
 ```
 
 ## Security Notes

@@ -15,6 +15,7 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-300}"  # 5 minutes default
 MAX_RETRIES="${MAX_RETRIES:-3}"
 LOG_FILE="${LOG_FILE:-vps-monitor.log}"
 PREFERRED_ORDER="${PREFERRED_ORDER:-true}"  # Try datacenters in order if true, random if false
+STATE_FILE="${STATE_FILE:-vps-monitor.state}"  # State file to prevent duplicate orders
 
 # Colors for output
 RED='\033[0;31m'
@@ -29,6 +30,52 @@ log() {
     local message="$2"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "$timestamp [$level] $message" | tee -a "$LOG_FILE"
+}
+
+# State management functions
+create_state_file() {
+    local plan_code="$1"
+    local datacenter="$2"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    cat > "$STATE_FILE" << EOF
+# VPS Monitor State File
+# This file prevents duplicate orders
+ORDER_PLACED=true
+PLAN_CODE=$plan_code
+DATACENTER=$datacenter
+TIMESTAMP=$timestamp
+PID=$$
+EOF
+    log "INFO" "${GREEN}✅ State file created: $STATE_FILE${NC}"
+}
+
+check_state_file() {
+    if [[ -f "$STATE_FILE" ]]; then
+        log "INFO" "${YELLOW}📁 Found existing state file: $STATE_FILE${NC}"
+
+        # Read state file
+        source "$STATE_FILE" 2>/dev/null || {
+            log "WARN" "${YELLOW}Could not read state file, ignoring...${NC}"
+            return 1
+        }
+
+        if [[ "${ORDER_PLACED:-}" == "true" ]]; then
+            log "SUCCESS" "${GREEN}🎉 Order already placed successfully!${NC}"
+            log "INFO" "Plan: ${PLAN_CODE:-unknown}"
+            log "INFO" "Datacenter: ${DATACENTER:-unknown}"
+            log "INFO" "Timestamp: ${TIMESTAMP:-unknown}"
+            log "INFO" "${BLUE}To reset and monitor again, delete the state file: rm $STATE_FILE${NC}"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+cleanup_state_file() {
+    if [[ -f "$STATE_FILE" ]]; then
+        rm -f "$STATE_FILE"
+        log "INFO" "${BLUE}🧹 State file cleaned up${NC}"
+    fi
 }
 
 # Check if required environment variables are set
@@ -168,6 +215,13 @@ main() {
     log "INFO" "  Check Interval: $CHECK_INTERVAL seconds"
     log "INFO" "  Preferred Order: $PREFERRED_ORDER"
     log "INFO" "  Log File: $LOG_FILE"
+    log "INFO" "  State File: $STATE_FILE"
+
+    # Check state file to prevent duplicate orders
+    if check_state_file; then
+        log "INFO" "${GREEN}Exiting to prevent duplicate orders. Delete $STATE_FILE to reset.${NC}"
+        exit 0
+    fi
 
     # Check environment variables
     local full_mode=true
@@ -216,6 +270,8 @@ main() {
 
                     if place_order "$VPS_PLAN_CODE" "$COUNTRY" "$ENDPOINT" "$available_datacenter" "$OS_OPTION"; then
                         order_success=true
+                        # Create state file to prevent duplicate orders
+                        create_state_file "$VPS_PLAN_CODE" "$available_datacenter"
                         send_notification "✅ VPS Order Successful! $VPS_PLAN_CODE in $available_datacenter"
                         log "SUCCESS" "${GREEN}🎉 Order completed successfully! Exiting monitor.${NC}"
                         exit 0
@@ -248,6 +304,17 @@ main() {
 # Handle script interruption
 trap 'log "INFO" "${YELLOW}Script interrupted by user${NC}"; exit 130' INT TERM
 
+# Handle reset command
+if [[ "${1:-}" == "--reset" ]]; then
+    if [[ -f "$STATE_FILE" ]]; then
+        cleanup_state_file
+        log "SUCCESS" "${GREEN}✅ State file reset. Monitor will run normally on next start.${NC}"
+    else
+        log "INFO" "${BLUE}No state file found to reset.${NC}"
+    fi
+    exit 0
+fi
+
 # Show usage if requested
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "VPS Availability Monitor and Auto-Order Script"
@@ -265,6 +332,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "  MAX_RETRIES      - Max order retry attempts (default: 3)"
     echo "  LOG_FILE         - Log file path (default: vps-monitor.log)"
     echo "  WEBHOOK_URL      - Optional webhook URL for notifications"
+    echo "  STATE_FILE       - State file to prevent duplicate orders (default: vps-monitor.state)"
     echo ""
     echo "Required OVH API credentials (for auto-ordering):"
     echo "  OVH_APP_KEY      - Your OVH application key"
@@ -275,6 +343,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo ""
     echo "Usage:"
     echo "  ./vps-monitor.sh              # Start monitoring"
+    echo "  ./vps-monitor.sh --reset      # Reset state file (allows new orders)"
     echo "  ./vps-monitor.sh --help       # Show this help"
     echo ""
     echo "Example:"

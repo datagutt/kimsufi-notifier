@@ -13,6 +13,7 @@ export OS_OPTION="os=option-linux"           # OS option for ordering
 export CHECK_INTERVAL="300"                  # Check every 5 minutes (300 seconds)
 export MAX_RETRIES="3"                       # Max order retry attempts
 export LOG_FILE="vps-monitor.log"            # Log file location
+export STATE_FILE="vps-monitor.state"        # State file to prevent duplicate orders
 
 # Optional: Webhook for notifications (Slack, Discord, etc.)
 # export WEBHOOK_URL="https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
