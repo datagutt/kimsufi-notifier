@@ -40,11 +40,11 @@ create_state_file() {
     cat > "$STATE_FILE" << EOF
 # VPS Monitor State File
 # This file prevents duplicate orders
-ORDER_PLACED=true
-PLAN_CODE=$plan_code
-DATACENTER=$datacenter
-TIMESTAMP=$timestamp
-PID=$$
+export ORDER_PLACED="true"
+export PLAN_CODE="$plan_code"
+export DATACENTER="$datacenter"
+export TIMESTAMP="$timestamp"
+export PID="$$"
 EOF
     log "INFO" "${GREEN}✅ State file created: $STATE_FILE${NC}"
 }
