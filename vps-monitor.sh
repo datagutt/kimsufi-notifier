@@ -3,7 +3,7 @@
 # VPS Availability Monitor and Auto-Order Script
 # This script checks for VPS availability and automatically places an order when stock is available
 
-set -e  # Exit on any error
+# set -e  # Exit on any error - commented out to allow script to continue on errors
 
 # Configuration - Modify these variables as needed
 VPS_PLAN_CODE="${VPS_PLAN_CODE:-vps-2025-model2}"
@@ -46,13 +46,15 @@ check_env_vars() {
     fi
 
     if [[ ${#missing_vars[@]} -gt 0 ]]; then
-        log "ERROR" "${RED}Missing required environment variables: ${missing_vars[*]}${NC}"
-        log "INFO" "Please set the following environment variables:"
+        log "WARN" "${YELLOW}⚠️  Missing OVH API credentials: ${missing_vars[*]}${NC}"
+        log "INFO" "${BLUE}📊 Running in MONITORING-ONLY mode (no orders will be placed)${NC}"
+        log "INFO" "To enable auto-ordering, set the following environment variables:"
         log "INFO" "  export OVH_APP_KEY='your_app_key'"
         log "INFO" "  export OVH_APP_SECRET='your_app_secret'"
         log "INFO" "  export OVH_CONSUMER_KEY='your_consumer_key'"
-        exit 1
+        return 1  # Return 1 to indicate monitoring-only mode
     fi
+    return 0  # Return 0 for full mode
 }
 
 # Check VPS availability in multiple datacenters
@@ -69,8 +71,10 @@ check_availability() {
 
     # Run the check command and capture output
     local output
+    local cmd_exit_code
     if ! output=$("./kimsufi-notifier" check --plan-code "$plan_code" --country "$country" --endpoint "$endpoint" 2>&1); then
-        log "ERROR" "${RED}Failed to check availability: $output${NC}"
+        cmd_exit_code=$?
+        log "ERROR" "${RED}Failed to check availability (exit code: $cmd_exit_code): $output${NC}"
         return 1
     fi
 
@@ -166,13 +170,23 @@ main() {
     log "INFO" "  Log File: $LOG_FILE"
 
     # Check environment variables
-    check_env_vars
+    local full_mode=true
+    if ! check_env_vars; then
+        full_mode=false
+    fi
 
     # Check if binary exists
     if [[ ! -f "./kimsufi-notifier" ]]; then
         log "ERROR" "${RED}kimsufi-notifier binary not found in current directory${NC}"
         log "INFO" "Please build the binary first: go build -o kimsufi-notifier ."
         exit 1
+    fi
+
+    # Display mode
+    if [[ "$full_mode" == true ]]; then
+        log "INFO" "${GREEN}🔥 Running in FULL mode (monitoring + auto-ordering)${NC}"
+    else
+        log "INFO" "${BLUE}👀 Running in MONITORING-ONLY mode (no orders will be placed)${NC}"
     fi
 
     local attempt=0
@@ -187,29 +201,41 @@ main() {
 
         # Check availability
         local available_datacenter
-        if available_datacenter=$(check_availability "$VPS_PLAN_CODE" "$COUNTRY" "$ENDPOINT" "$DATACENTERS"); then
-            # VPS is available in at least one datacenter, try to place order
-            local order_success=false
+        local check_result
+        check_result=$(check_availability "$VPS_PLAN_CODE" "$COUNTRY" "$ENDPOINT" "$DATACENTERS")
+        local check_exit_code=$?
 
-            for ((retry=1; retry<=MAX_RETRIES; retry++)); do
-                log "INFO" "Order attempt $retry/$MAX_RETRIES for $available_datacenter"
+        if [[ $check_exit_code -eq 0 ]] && [[ -n "$check_result" ]]; then
+            available_datacenter="$check_result"
+            if [[ "$full_mode" == true ]]; then
+                # VPS is available in at least one datacenter, try to place order
+                local order_success=false
 
-                if place_order "$VPS_PLAN_CODE" "$COUNTRY" "$ENDPOINT" "$available_datacenter" "$OS_OPTION"; then
-                    order_success=true
-                    send_notification "✅ VPS Order Successful! $VPS_PLAN_CODE in $available_datacenter"
-                    log "SUCCESS" "${GREEN}🎉 Order completed successfully! Exiting monitor.${NC}"
-                    exit 0
-                else
-                    if [[ $retry -lt $MAX_RETRIES ]]; then
-                        log "WARN" "${YELLOW}Order attempt $retry failed, retrying in 10 seconds...${NC}"
-                        sleep 10
+                for ((retry=1; retry<=MAX_RETRIES; retry++)); do
+                    log "INFO" "Order attempt $retry/$MAX_RETRIES for $available_datacenter"
+
+                    if place_order "$VPS_PLAN_CODE" "$COUNTRY" "$ENDPOINT" "$available_datacenter" "$OS_OPTION"; then
+                        order_success=true
+                        send_notification "✅ VPS Order Successful! $VPS_PLAN_CODE in $available_datacenter"
+                        log "SUCCESS" "${GREEN}🎉 Order completed successfully! Exiting monitor.${NC}"
+                        exit 0
+                    else
+                        if [[ $retry -lt $MAX_RETRIES ]]; then
+                            log "WARN" "${YELLOW}Order attempt $retry failed, retrying in 10 seconds...${NC}"
+                            sleep 10
+                        fi
                     fi
-                fi
-            done
+                done
 
-            if [[ "$order_success" == false ]]; then
-                send_notification "❌ VPS Order Failed after $MAX_RETRIES attempts: $VPS_PLAN_CODE in $available_datacenter"
-                log "ERROR" "${RED}All order attempts failed. Continuing to monitor...${NC}"
+                if [[ "$order_success" == false ]]; then
+                    send_notification "❌ VPS Order Failed after $MAX_RETRIES attempts: $VPS_PLAN_CODE in $available_datacenter"
+                    log "ERROR" "${RED}All order attempts failed. Continuing to monitor...${NC}"
+                fi
+            else
+                # Monitoring-only mode - just notify about availability
+                log "SUCCESS" "${GREEN}📢 STOCK FOUND: $VPS_PLAN_CODE available in $available_datacenter${NC}"
+                send_notification "📢 STOCK ALERT: $VPS_PLAN_CODE available in $available_datacenter (monitoring-only mode)"
+                log "INFO" "${BLUE}💡 Set OVH credentials to enable auto-ordering${NC}"
             fi
         fi
 
@@ -240,10 +266,12 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "  LOG_FILE         - Log file path (default: vps-monitor.log)"
     echo "  WEBHOOK_URL      - Optional webhook URL for notifications"
     echo ""
-    echo "Required OVH API credentials:"
+    echo "Required OVH API credentials (for auto-ordering):"
     echo "  OVH_APP_KEY      - Your OVH application key"
     echo "  OVH_APP_SECRET   - Your OVH application secret"
     echo "  OVH_CONSUMER_KEY - Your OVH consumer key"
+    echo ""
+    echo "Note: If credentials are missing, the script runs in MONITORING-ONLY mode"
     echo ""
     echo "Usage:"
     echo "  ./vps-monitor.sh              # Start monitoring"

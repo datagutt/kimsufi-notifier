@@ -6,6 +6,7 @@ A shell script that continuously monitors VPS availability and automatically pla
 
 - 🔍 **Continuous Monitoring** - Checks VPS availability at configurable intervals
 - 🚀 **Auto-Ordering** - Automatically places orders when VPS becomes available
+- 👀 **Monitoring-Only Mode** - Run without credentials to monitor availability only
 - 📊 **Detailed Logging** - Comprehensive logging with timestamps and colored output
 - 🔄 **Retry Logic** - Handles order failures with configurable retry attempts
 - 🔔 **Notifications** - Optional webhook notifications for order success/failure
@@ -49,6 +50,8 @@ source vps-monitor-config.sh
 | `OVH_APP_KEY` | Your OVH application key | `abc123def456` |
 | `OVH_APP_SECRET` | Your OVH application secret | `def789ghi012` |
 | `OVH_CONSUMER_KEY` | Your OVH consumer key | `jkl345mno678` |
+
+**Note:** If OVH credentials are missing, the script runs in **monitoring-only mode** - it will check availability and notify you when stock is found, but won't place orders.
 
 ### Optional Configuration
 
@@ -140,6 +143,35 @@ export VPS_PLAN_CODE="vps-value-1-4-80"      # 1 vCPU, 4GB RAM, 80GB SSD
 ```bash
 export VPS_PLAN_CODE="vps-essential-2-4-40"   # 2 vCPU, 4GB RAM, 40GB SSD
 export VPS_PLAN_CODE="vps-essential-2-4-80"   # 2 vCPU, 4GB RAM, 80GB SSD
+```
+
+## Monitoring-Only Mode
+
+If you don't have OVH API credentials set up, the script will automatically run in **monitoring-only mode**:
+
+### Features in Monitoring-Only Mode
+- ✅ Checks availability across all specified datacenters
+- ✅ Logs detailed availability status
+- ✅ Sends notifications when stock is found
+- ✅ Continues monitoring indefinitely
+- ❌ Does not attempt to place orders
+
+### Example Output
+```
+2024-01-15 10:30:15 [WARN] ⚠️  Missing OVH API credentials: OVH_APP_KEY OVH_APP_SECRET OVH_CONSUMER_KEY
+2024-01-15 10:30:15 [INFO] 📊 Running in MONITORING-ONLY mode (no orders will be placed)
+2024-01-15 10:35:25 [SUCCESS] 📢 STOCK FOUND: vps-2025-model2 available in US-WEST-OR
+2024-01-15 10:35:25 [INFO] 💡 Set OVH credentials to enable auto-ordering
+```
+
+### Switching to Full Mode
+Once you have your OVH credentials, simply set them and restart the script:
+
+```bash
+export OVH_APP_KEY="your_key"
+export OVH_APP_SECRET="your_secret"
+export OVH_CONSUMER_KEY="your_consumer_key"
+./vps-monitor.sh
 ```
 
 ## Multiple Datacenter Support
