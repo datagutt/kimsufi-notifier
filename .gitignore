@@ -1,3 +1,4 @@
 kimsufi-notifier
 .env
 *.log
+*vps-monitor.state
