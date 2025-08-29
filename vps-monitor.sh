@@ -174,10 +174,8 @@ place_order() {
 
     log "INFO" "${GREEN}🚀 Placing order for $plan_code in $datacenter...${NC}"
 
-    local order_cmd="./kimsufi-notifier order --plan-code \"$plan_code\" --country \"$country\" --endpoint \"$endpoint\" -d \"$datacenter\" --item-option \"$os_option\""
-
-    # Execute the order command
-    if output=$($order_cmd 2>&1); then
+    # Execute the order command directly to avoid shell quoting issues
+    if output=$(./kimsufi-notifier order --plan-code "$plan_code" --country "$country" --endpoint "$endpoint" --datacenters "$datacenter" --item-option "$os_option" 2>&1); then
         log "SUCCESS" "${GREEN}✅ Order placed successfully!${NC}"
         echo "$output"
         # Extract order URL if present
